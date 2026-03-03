@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Demerzel STT - Live Transcription</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #7eb8da;
+            margin-bottom: 8px;
+            font-size: 1.6em;
+            font-weight: 300;
+        }
+        .status-bar {
+            text-align: center;
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        .status-bar .connected { color: #4caf50; }
+        .status-bar .error { color: #f44336; }
+        .status-bar .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .status-bar .dot.on { background: #4caf50; animation: pulse 2s infinite; }
+        .status-bar .dot.off { background: #f44336; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .card {
+            background: #141420;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .card h2 {
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #7eb8da;
+            margin-bottom: 10px;
+        }
+        #live-transcript {
+            font-size: 1.3em;
+            min-height: 40px;
+            color: #fff;
+            line-height: 1.4;
+        }
+        #staged-transcript {
+            font-size: 1.05em;
+            min-height: 24px;
+            color: #888;
+            line-height: 1.4;
+        }
+        #final-transcript {
+            list-style: none;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        #final-transcript li {
+            padding: 10px 0;
+            border-bottom: 1px solid #1e1e2e;
+            color: #aaa;
+            font-size: 0.95em;
+        }
+        #final-transcript li:last-child { border-bottom: none; }
+        .controls {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .controls button {
+            background: #2a2a3a;
+            color: #7eb8da;
+            border: 1px solid #3a3a4a;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .controls button:hover { background: #3a3a4a; }
+        .debug {
+            font-size: 0.75em;
+            color: #444;
+            text-align: center;
+            margin-top: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Demerzel STT</h1>
+        <div class="status-bar">
+            <span class="dot" id="status-dot"></span>
+            <span id="connection-status">Connecting...</span>
+        </div>
+
+        <div class="controls">
+            <button onclick="clearTranscripts()">Clear</button>
+        </div>
+
+        <div class="card">
+            <h2>Live</h2>
+            <div id="live-transcript">Waiting for speech...</div>
+        </div>
+
+        <div class="card">
+            <h2>Staged</h2>
+            <div id="staged-transcript"></div>
+        </div>
+
+        <div class="card">
+            <h2>History</h2>
+            <ul id="final-transcript"></ul>
+        </div>
+
+        <div class="debug">
+            Last update: <span id="last-update">--</span>
+        </div>
+    </div>
+
+    <script>
+        const dot = document.getElementById('status-dot');
+        const statusText = document.getElementById('connection-status');
+
+        function updateTranscripts() {
+            fetch('/transcript')
+                .then(r => r.json())
+                .then(data => {
+                    dot.className = 'dot on';
+                    statusText.textContent = 'Listening';
+                    statusText.className = 'connected';
+                    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+
+                    const fullText = data.current;
+                    const liveEl = document.getElementById('live-transcript');
+                    const stagedEl = document.getElementById('staged-transcript');
+
+                    if (!fullText) {
+                        liveEl.textContent = 'Waiting for speech...';
+                        stagedEl.textContent = '';
+                    } else {
+                        const breaks = [fullText.lastIndexOf('.'), fullText.lastIndexOf('?'), fullText.lastIndexOf('!')];
+                        const lastBreak = Math.max(...breaks);
+                        if (lastBreak > -1 && lastBreak < fullText.length - 1) {
+                            stagedEl.textContent = fullText.substring(0, lastBreak + 1);
+                            liveEl.textContent = fullText.substring(lastBreak + 1).trim();
+                        } else {
+                            stagedEl.textContent = '';
+                            liveEl.textContent = fullText;
+                        }
+                    }
+
+                    const list = document.getElementById('final-transcript');
+                    if (list.childElementCount !== data.final.length) {
+                        list.innerHTML = '';
+                        data.final.slice().reverse().forEach(text => {
+                            const li = document.createElement('li');
+                            li.textContent = text;
+                            list.appendChild(li);
+                        });
+                    }
+                })
+                .catch(() => {
+                    dot.className = 'dot off';
+                    statusText.textContent = 'Disconnected';
+                    statusText.className = 'error';
+                });
+        }
+
+        function clearTranscripts() {
+            fetch('/clear', { method: 'POST' })
+                .then(() => {
+                    document.getElementById('live-transcript').textContent = 'Waiting for speech...';
+                    document.getElementById('staged-transcript').textContent = '';
+                    document.getElementById('final-transcript').innerHTML = '';
+                });
+        }
+
+        setInterval(updateTranscripts, 500);
+        updateTranscripts();
+    </script>
+</body>
+</html>
